@@ -1,151 +1,78 @@
-// =======================
-// Import Dependencies
-// =======================
-import { GoogleGenAI } from "@google/genai"; // ESModule
+// import dependencies yang kita butuhkan di file ini
+// CommonJS --> const genai = require("@google/genai");
+// const { GoogleGenAI } = genai;
+import { GoogleGenAI } from "@google/genai"; // ESModule (ESM)
 import "dotenv/config";
-import express from "express";
+import express, { response } from "express";
 import cors from "cors";
 import multer from "multer";
-
-const { PORT, GEMINI_API_KEY } = process.env;
-
-// =======================
-// Init Express
-// =======================
+ 
+const { PORT } = process.env;
+ 
+// init Express-nya
 const app = express();
-app.use(cors());
-app.use(express.json());
-
-// =======================
-// Init Multer (Memory Storage)
-// =======================
-const upload = multer({ storage: multer.memoryStorage() });
-
-// =======================
-// Init GoogleGenAI
-// =======================
-const ai = new GoogleGenAI({
-  apiKey: GEMINI_API_KEY
-});
-
-// =======================
-// 1. GENERATE TEXT (Chat)
-// =======================
-app.post("/chat", async (req, res) => {
-  if (!req.body) return res.status(400).send("Tidak ada request body nih!");
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).send("Tidak ada prompt nih!");
-
-  try {
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: prompt
-    });
-
-    return res.status(200).send(aiResponse.text);
-  } catch (e) {
-    return res.status(500).send(e.message);
+ 
+// tambahkan middleware-nya ke dalam app
+app.use(cors()); // CORS: Cross-Origin Resource Sharing
+app.use(express.json()); // membolehkan request dengan Content-Type: application/json
+app.use(express.static('public'));
+// The client gets the API key from the environment variable `GEMINI_API_KEY`.
+const ai = new GoogleGenAI({}); // instantiate sebuah class menjadi sebuah instance object di variable `ai`
+ 
+// tambahkan route handler
+// request untuk POST /chat
+// http://localhost:3000/chat --> POST
+// JSON body: { prompt: "" }
+app.post('/chat', async (req, res) => {
+  // guard clause (satpam)
+  if (!req.body) {
+    // lempar 400
+    return res.status(400).send("Tidak ada request body nih!");
   }
-});
-
-// =======================
-// 2. GENERATE FROM IMAGE
-// =======================
-app.post("/generate-from-image", upload.single("image"), async (req, res) => {
-  if (!req.file) return res.status(400).send("Tidak ada file gambar yang diupload!");
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).send("Tidak ada prompt nih!");
-
-  try {
-    const imagePart = ai.files.imageToGenerativePart(
-      req.file.buffer,
-      req.file.mimetype
+ 
+  const { messages } = req.body;
+  // messages: { role: 'user' | 'model', content: string }[]
+ 
+  // kasih satpam lagi buat periksa isi prompt-nya
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).send(
+      "Tidak ada pesan nih, atau pesannya nggak beraturan! Pesan harus berupa array berisi role dan juga content"
     );
-
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [
-        { role: "user", parts: [ { text: prompt }, imagePart ] }
-      ]
-    });
-
-    return res.status(200).send(aiResponse.text);
-  } catch (e) {
-    return res.status(500).send(e.message);
   }
-});
-
-// ==========================
-// 3. GENERATE FROM DOCUMENT
-// ==========================
-app.post("/generate-from-document", upload.single("document"), async (req, res) => {
-  if (!req.file) return res.status(400).send("Tidak ada file dokumen yang diupload!");
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).send("Tidak ada prompt nih!");
-
+ 
+  // Array mapping
+  // looping untuk mengubah (mapping) dari satu object/tipe ke tipe/object lain
+  const contents = messages.map(message => {
+    return {
+      role: message.role,
+      parts: [
+        { text: message.content }
+      ]
+    }
+  })
+ 
   try {
-    const base64Doc = req.file.buffer.toString("base64");
-
     const aiResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [
-        { role: "user", parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType: req.file.mimetype,
-              data: base64Doc
-            }
-          }
-        ]}
-      ]
+      config: {
+        systemInstruction: {
+          parts: [
+            { text: "Anda adalah seorang seniman yang gemar membuat puisi sebagai jawaban." }
+          ]
+        }
+      },
+      model: "gemini-2.5-flash-lite",
+      contents // shorthand dari "contents: contents"
+    })
+ 
+    return res.status(200).json({
+      response: aiResponse.text
     });
-
-    return res.status(200).send(aiResponse.text);
-  } catch (e) {
-    return res.status(500).send(e.message);
-  }
+  } catch (error) {
+    };
+    response: aiResponse.text
 });
-
-// ==========================
-// 4. GENERATE FROM AUDIO
-// ==========================
-app.post("/generate-from-audio", upload.single("audio"), async (req, res) => {
-  if (!req.file) return res.status(400).send("Tidak ada file audio yang diupload!");
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).send("Tidak ada prompt nih!");
-
-  try {
-    const base64Audio = req.file.buffer.toString("base64");
-
-    const aiResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: [
-        { role: "user", parts: [
-          { text: prompt },
-          {
-            inlineData: {
-              mimeType: req.file.mimetype, // contoh: audio/mpeg, audio/wav
-              data: base64Audio
-            }
-          }
-        ]}
-      ]
-    });
-
-    return res.status(200).send(aiResponse.text);
-  } catch (e) {
-    return res.status(500).send(e.message);
-  }
-});
-
-// =======================
-// Start Server
-// =======================
+ 
+// membuat app-nya "mendengar" port [PORT]
 app.listen(PORT, () => {
-  console.log(`Server berjalan di http://localhost:${PORT}`);
+  console.log("I LOVE YOU " + PORT);
 });
